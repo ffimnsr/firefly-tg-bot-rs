@@ -24,5 +24,11 @@ docker image push -a ghcr.io/ffimnsr/firefly-tg-bot-rs
 docker image push -a 0x61c88647/firefly-tg-bot-rs
 '''
 
+[tasks.clean]
+script = '''
+docker system prune --volumes -f
+docker image prune -a --filter="until=1h" --filter "label=org.label-schema.name=firefly-tg-bot-rs" -f
+'''
+
 [tasks.deploy]
-dependencies = [ "build", "push" ]
+dependencies = [ "build", "push", "clean" ]
