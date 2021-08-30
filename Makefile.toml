@@ -1,0 +1,28 @@
+[config]
+skip_core_tasks = true
+min_version = "0.35.0"
+
+[env]
+BUILD_VERSION = "${CARGO_MAKE_PROJECT_VERSION}"
+
+[tasks.build]
+script = '''
+docker build \
+    -f ./Dockerfile \
+    --build-arg service_version=${BUILD_VERSION} \
+    --build-arg build-date=$(date --iso-8601=seconds -u) \
+    --build-arg vcs_ref=$(git rev-parse --short HEAD) \
+    -t 0x61c88647/firefly-tg-bot-rs:${BUILD_VERSION} \
+    -t 0x61c88647/firefly-tg-bot-rs:latest \
+    -t ghcr.io/ffimnsr/firefly-tg-bot-rs:${BUILD_VERSION} \
+    -t ghcr.io/ffimnsr/firefly-tg-bot-rs:latest .
+'''
+
+[tasks.push]
+script = '''
+docker image push -a ghcr.io/ffimnsr/firefly-tg-bot-rs
+docker image push -a 0x61c88647/firefly-tg-bot-rs
+'''
+
+[tasks.deploy]
+dependencies = [ "build", "push" ]
