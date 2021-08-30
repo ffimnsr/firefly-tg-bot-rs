@@ -141,13 +141,12 @@ async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<B
                     "details": details,
                 });
 
+                error!("Fatal error occurred:\n{}", serde_json::to_string_pretty(&data)?);
+
                 Ok(Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(
-                        hyper::header::CONTENT_TYPE,
-                        JSON_MIME,
-                    )
-                    .body(Body::from(data.to_string()))?)
+                    .status(StatusCode::OK)
+                    .header(hyper::header::CONTENT_LENGTH, 0)
+                    .body(Body::empty())?)
             }
         },
         Err(e) => {
@@ -159,13 +158,12 @@ async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<B
                 "details": e.to_string(),
             });
 
+            error!("Fatal error occurred:\n{}", serde_json::to_string_pretty(&data)?);
+
             Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header(
-                    hyper::header::CONTENT_TYPE,
-                    JSON_MIME,
-                )
-                .body(Body::from(data.to_string()))?)
+                .status(StatusCode::OK)
+                .header(hyper::header::CONTENT_LENGTH, 0)
+                .body(Body::empty())?)
         },
     }
 }

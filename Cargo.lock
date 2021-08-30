@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "firefly_tg"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "chrono",
  "dotenv",
