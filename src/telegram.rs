@@ -64,7 +64,7 @@ impl TelegramContext {
         let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
             "chat_id": self.state.chat_id,
             "parse_mode": "Markdown",
-            "text": "Please enter your *Firefly III* server's URL (e.g. https://firefly-iii.example.com).\n\nIt must start with HTTP/s protocol scheme.",
+            "text": "Please enter your *Firefly III* server's URL (e.g. https://my-firefly-iii.com).\n\nIt must start with HTTP/s protocol scheme.",
         }))
         .await
         .map_err(|e| e.into());

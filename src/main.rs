@@ -119,7 +119,7 @@ async fn hello_world(_: Request<Body>) -> ServiceResult<Response<Body>> {
 }
 
 async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<Body>> {
-    let db = req.data::<Arc<Database>>().ok_or("Unknown KV database instance")?.to_owned();
+    let db = req.data::<Arc<Database>>().ok_or("Unknown key-value store instance")?.to_owned();
     let (_, body) = req.into_parts();
     let body_raw = hyper::body::to_bytes(body).await?;
     let update = serde_json::from_slice::<Update>(&body_raw)?;
