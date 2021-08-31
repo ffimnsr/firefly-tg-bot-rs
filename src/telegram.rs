@@ -59,17 +59,30 @@ impl TelegramContext {
     }
 
     async fn cmd_start(&self) -> Result<reqwest::Response, GenericError> {
-        self.db.users.insert(self.get_user_id(), UserClue::new(self.state.from_id))?;
+        let exists = self.db.users.contains_key(self.get_user_id())?;
 
-        let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
-            "chat_id": self.state.chat_id,
-            "parse_mode": "Markdown",
-            "text": "Please enter your *Firefly III* server's URL (e.g. https://my-firefly-iii.com).\n\nIt must start with HTTP/s protocol scheme.",
-        }))
-        .await
-        .map_err(|e| e.into());
+        if exists {
+            let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
+                "chat_id": self.state.chat_id,
+                "text": "Type /reset to reset your account.",
+            }))
+            .await
+            .map_err(|e| e.into());
 
-        tg_resp
+            tg_resp
+        } else {
+            self.db.users.insert(self.get_user_id(), UserClue::new(self.state.from_id))?;
+
+            let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
+                "chat_id": self.state.chat_id,
+                "parse_mode": "Markdown",
+                "text": "Please enter your *Firefly III* server's URL (e.g. https://my-firefly-iii.com).\n\nIt must start with HTTP/s protocol scheme.",
+            }))
+            .await
+            .map_err(|e| e.into());
+
+            tg_resp
+        }
     }
 
     async fn cmd_reset(&self) -> Result<reqwest::Response, GenericError> {
@@ -154,27 +167,36 @@ impl TelegramContext {
         let params = payload.split(',').map(|x| x.trim().to_owned()).collect::<Vec<String>>();
         let today = Utc::now();
 
-        let transact = Transaction {
-            transact_type: "withdrawal".into(),
-            amount: params[0].clone(),
-            description: params[1].clone(),
-            date: today.format("%Y-%m-%d").to_string(),
-            source_name: params[2].clone(),
-            destination_name: params[3].clone(),
-        };
+        if params.len() == 4 {
+            let transact = Transaction {
+                transact_type: "withdrawal".into(),
+                amount: params[0].clone(),
+                description: params[1].clone(),
+                date: today.format("%Y-%m-%d").to_string(),
+                source_name: params[2].clone(),
+                destination_name: params[3].clone(),
+            };
 
-        info!("{:?}", transact);
+            user.create_transaction(TransactPayload { transactions: vec![transact] }).await?;
 
-        user.create_transaction(TransactPayload { transactions: vec![transact] }).await?;
+            let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
+                "chat_id": self.state.chat_id,
+                "text": "Transaction created.",
+            }))
+            .await
+            .map_err(|e| e.into());
 
-        let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
-            "chat_id": self.state.chat_id,
-            "text": "Transaction created.",
-        }))
-        .await
-        .map_err(|e| e.into());
+            tg_resp
+        } else {
+            let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
+                "chat_id": self.state.chat_id,
+                "text": "Type /help to check the proper way of creating a transaction.",
+            }))
+            .await
+            .map_err(|e| e.into());
 
-        tg_resp
+            tg_resp
+        }
     }
 
     async fn upload_url(&self, payload: &str) -> Result<reqwest::Response, GenericError> {
