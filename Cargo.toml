@@ -24,3 +24,4 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 lazy_static = "1.4"
 sled = "0.34"
 sled-extensions = { version = "0.2", features = ["bincode"] }
+urlencoding = "2.1"

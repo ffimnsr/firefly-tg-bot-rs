@@ -1,11 +1,11 @@
 mod telegram;
+mod wit;
 
 use std::{env, sync::Arc};
 use log::{info, error};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use routerify::prelude::*;
 use routerify::{Middleware, Router, RouterService};
-use serde::Deserialize;
 use lazy_static::lazy_static;
 use sled_extensions::DbExt;
 use sled_extensions::bincode::Tree;
@@ -14,74 +14,6 @@ use telegram::{TelegramContext, UserClue};
 pub type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
 pub type ServiceResult<T> = std::result::Result<T, GenericError>;
-
-/// This object represents a Telegram user or bot.
-#[derive(Debug, Deserialize)]
-pub struct User {
-    /// Unique identifier for this user or bot. This number may have more than 32 significant bits and some programming languages may have difficulty/silent defects in interpreting it. But it has at most 52 significant bits, so a 64-bit integer or double-precision float type are safe for storing this identifier.
-    pub id: i32,
-
-    /// True, if this user is a bot
-    pub is_bot: bool,
-
-    /// User's or bot's first name
-    pub first_name: String,
-
-    /// User's or bot's last name
-    pub last_name: Option<String>,
-
-    /// User's or bot's username
-    pub username: Option<String>,
-}
-
-/// This object represents a chat.
-#[derive(Debug, Deserialize)]
-pub struct Chat {
-    /// Unique identifier for this chat. This number may have more than 32 significant bits and some programming languages may have difficulty/silent defects in interpreting it. But it has at most 52 significant bits, so a signed 64-bit integer or double-precision float type are safe for storing this identifier.
-    pub id: i32,
-
-    /// Type of chat, can be either “private”, “group”, “supergroup” or “channel”.
-    #[serde(rename = "type")]
-    pub chat_type: String,
-
-    /// Username, for private chats, supergroups and channels if available
-    pub username: Option<String>,
-
-    /// First name of the other party in a private chat
-    pub first_name: Option<String>,
-
-    /// Last name of the other party in a private chat
-    pub last_name: Option<String>,
-}
-
-/// This object represents a message.
-#[derive(Debug, Deserialize)]
-pub struct Message {
-    /// Unique message identifier inside this chat
-    pub message_id: i32,
-
-    /// Date the message was sent in Unix time
-    pub date: i64,
-
-    /// For text messages, the actual UTF-8 text of the message, 0-4096 characters.
-    pub text: Option<String>,
-
-    /// Conversation the message belongs to
-    pub chat: Chat,
-
-    /// Sender, empty for messages sent to channels
-    pub from: Option<User>,
-}
-
-/// This object represents an incoming update.
-#[derive(Debug, Deserialize)]
-pub struct Update {
-    /// The update's unique identifier. Update identifiers start from a certain positive number and increase sequentially. This ID becomes especially handy if you're using Webhooks, since it allows you to ignore repeated updates or to restore the correct update sequence, should they get out of order. If there are no new updates for at least a week, then identifier of the next update will be chosen randomly instead of sequentially.
-    pub update_id: i32,
-
-    /// New incoming message of any kind -- text, photo, sticker, etc.
-    pub message: Option<Message>,
-}
 
 pub struct Database {
     users: Tree<UserClue>,
@@ -99,6 +31,9 @@ lazy_static! {
     };
     static ref APP_SHARED_STORAGE_PATH: String = {
         env::var("APP_SHARED_STORAGE_PATH").expect("App shared storage not set.")
+    };
+    static ref WIT_ACCESS_TOKEN: String = {
+        env::var("WIT_ACCESS_TOKEN").expect("Wit access token not set.")
     };
 }
 
@@ -118,22 +53,12 @@ async fn hello_world(_: Request<Body>) -> ServiceResult<Response<Body>> {
         .body(Body::from(data.to_string()))?)
 }
 
-async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<Body>> {
-    let db = req.data::<Arc<Database>>().ok_or("Unknown key-value store instance")?.to_owned();
-    let (_, body) = req.into_parts();
-    let body_raw = hyper::body::to_bytes(body).await?;
-    let update = serde_json::from_slice::<Update>(&body_raw)?;
+async fn run_expensive_task(db: Arc<Database>, update: telegram::Update) -> ServiceResult<()> {
     let mut context = TelegramContext::new(db.to_owned());
     let tg_resp = context.process_message(update).await;
-
     match tg_resp {
         Ok(t) => {
-            if t.status() == StatusCode::OK {
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header(hyper::header::CONTENT_LENGTH, 0)
-                    .body(Body::empty())?)
-            } else {
+            if t.status() != StatusCode::OK {
                 let details: serde_json::Value = serde_json::from_slice(&t.bytes().await.unwrap())?;
                 let data = serde_json::json!({
                     "success": false,
@@ -142,11 +67,6 @@ async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<B
                 });
 
                 error!("Fatal error occurred:\n{}", serde_json::to_string_pretty(&data)?);
-
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header(hyper::header::CONTENT_LENGTH, 0)
-                    .body(Body::empty())?)
             }
         },
         Err(e) => {
@@ -159,13 +79,24 @@ async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<B
             });
 
             error!("Fatal error occurred:\n{}", serde_json::to_string_pretty(&data)?);
-
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header(hyper::header::CONTENT_LENGTH, 0)
-                .body(Body::empty())?)
         },
     }
+
+    Ok(())
+}
+
+async fn handle_telegram_message(req: Request<Body>) -> ServiceResult<Response<Body>> {
+    let db = req.data::<Arc<Database>>().ok_or("Unknown key-value store instance")?.to_owned();
+    let (_, body) = req.into_parts();
+    let body_raw = hyper::body::to_bytes(body).await?;
+    let update = serde_json::from_slice::<telegram::Update>(&body_raw)?;
+
+    tokio::spawn(run_expensive_task(db, update));
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(hyper::header::CONTENT_LENGTH, 0)
+        .body(Body::empty())?)
 }
 
 async fn send_report(error_message: &str) {
@@ -186,6 +117,15 @@ pub async fn telegram_post(endpoint: &str, payload: &serde_json::Value) -> Resul
     reqwest::Client::new()
         .post(&url)
         .json(payload)
+        .send()
+        .await
+}
+
+pub async fn wit_message_get(query: &str) -> Result<reqwest::Response, reqwest::Error> {
+    reqwest::Client::new()
+        .get("https://api.wit.ai/message")
+        .query(&[("v", "20210902"), ("q", query)])
+        .bearer_auth(&*WIT_ACCESS_TOKEN)
         .send()
         .await
 }

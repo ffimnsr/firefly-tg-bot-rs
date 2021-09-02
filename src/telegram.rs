@@ -1,9 +1,79 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
-use log::info;
+use tokio::time::{sleep, Duration};
 
-use super::{Database, GenericError, Update};
+use crate::wit::{Deed, WitMessageResponse};
+
+use super::{Database, GenericError};
+
+/// This object represents a Telegram user or bot.
+#[derive(Debug, Deserialize)]
+pub struct User {
+    /// Unique identifier for this user or bot. This number may have more than 32 significant bits and some programming languages may have difficulty/silent defects in interpreting it. But it has at most 52 significant bits, so a 64-bit integer or double-precision float type are safe for storing this identifier.
+    pub id: i32,
+
+    /// True, if this user is a bot
+    pub is_bot: bool,
+
+    /// User's or bot's first name
+    pub first_name: String,
+
+    /// User's or bot's last name
+    pub last_name: Option<String>,
+
+    /// User's or bot's username
+    pub username: Option<String>,
+}
+
+/// This object represents a chat.
+#[derive(Debug, Deserialize)]
+pub struct Chat {
+    /// Unique identifier for this chat. This number may have more than 32 significant bits and some programming languages may have difficulty/silent defects in interpreting it. But it has at most 52 significant bits, so a signed 64-bit integer or double-precision float type are safe for storing this identifier.
+    pub id: i32,
+
+    /// Type of chat, can be either “private”, “group”, “supergroup” or “channel”.
+    #[serde(rename = "type")]
+    pub chat_type: String,
+
+    /// Username, for private chats, supergroups and channels if available
+    pub username: Option<String>,
+
+    /// First name of the other party in a private chat
+    pub first_name: Option<String>,
+
+    /// Last name of the other party in a private chat
+    pub last_name: Option<String>,
+}
+
+/// This object represents a message.
+#[derive(Debug, Deserialize)]
+pub struct Message {
+    /// Unique message identifier inside this chat
+    pub message_id: i32,
+
+    /// Date the message was sent in Unix time
+    pub date: i64,
+
+    /// For text messages, the actual UTF-8 text of the message, 0-4096 characters.
+    pub text: Option<String>,
+
+    /// Conversation the message belongs to
+    pub chat: Chat,
+
+    /// Sender, empty for messages sent to channels
+    pub from: Option<User>,
+}
+
+/// This object represents an incoming update.
+#[derive(Debug, Deserialize)]
+pub struct Update {
+    /// The update's unique identifier. Update identifiers start from a certain positive number and increase sequentially. This ID becomes especially handy if you're using Webhooks, since it allows you to ignore repeated updates or to restore the correct update sequence, should they get out of order. If there are no new updates for at least a week, then identifier of the next update will be chosen randomly instead of sequentially.
+    pub update_id: i32,
+
+    /// New incoming message of any kind -- text, photo, sticker, etc.
+    pub message: Option<Message>,
+}
 
 #[derive(Clone, Default)]
 pub struct State {
@@ -48,6 +118,13 @@ impl TelegramContext {
             from_id,
             chat_id: chat.id,
         });
+
+        super::telegram_post("sendChatAction", &serde_json::json!({
+            "chat_id": self.state.chat_id,
+            "action": "typing",
+        })).await?;
+
+        sleep(Duration::from_secs(5)).await;
 
         match text_payload.as_str() {
             "/start" => self.cmd_start().await,
@@ -116,8 +193,7 @@ impl TelegramContext {
                 "parse_mode": "Markdown",
                 "text": "
                 Send a message in the following format \
-                \n`Amount, Description, Source, Destination` \
-                \n\nThe first two parameters are required.
+                \n`The deed. And the transaction.`
                 ",
             }))
             .await
@@ -164,20 +240,54 @@ impl TelegramContext {
     }
 
     async fn transact(&self, user: UserClue, payload: &str) -> Result<reqwest::Response, GenericError> {
-        let params = payload.split(',').map(|x| x.trim().to_owned()).collect::<Vec<String>>();
-        let today = Utc::now();
+        let wit_response = super::wit_message_get(payload)
+            .await?
+            .json::<WitMessageResponse>()
+            .await?;
 
-        if params.len() == 4 {
+        if wit_response.intents.len().gt(&0) {
+            let description = wit_response.entities.deed
+                .unwrap_or(vec![])
+                .get(0)
+                .unwrap_or(&Deed {
+                    value: wit_response.text,
+                    ..Default::default()
+                })
+                .value
+                .to_owned();
+            let amount = wit_response.entities.amount_of_money
+                .get(0)
+                .ok_or("The amount of money is empty.")?
+                .value
+                .to_string();
+            let source_name = wit_response.entities.origin
+                .get(0)
+                .ok_or("The account origin is empty.")?
+                .value
+                .to_owned();
+            let destination_name = wit_response.entities.destination
+                .get(0)
+                .ok_or("The account destination is empty.")?
+                .value
+                .to_owned();
+            let transact_type = wit_response.traits.flow
+                .get(0)
+                .ok_or("The transact type is empty.")?
+                .value
+                .to_owned();
+
             let transact = Transaction {
-                transact_type: "withdrawal".into(),
-                amount: params[0].clone(),
-                description: params[1].clone(),
-                date: today.format("%Y-%m-%d").to_string(),
-                source_name: params[2].clone(),
-                destination_name: params[3].clone(),
+                transact_type,
+                amount,
+                description,
+                source_name,
+                destination_name,
+                date: Utc::now().format("%Y-%m-%d").to_string(),
             };
 
             user.create_transaction(TransactPayload { transactions: vec![transact] }).await?;
+
+            log::info!("Transaction created");
 
             let tg_resp = super::telegram_post("sendMessage", &serde_json::json!({
                 "chat_id": self.state.chat_id,
