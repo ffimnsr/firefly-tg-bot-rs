@@ -1,7 +1,14 @@
 [package]
 name = "firefly_tg"
 version = "0.1.8"
+authors = ["ffimnsr <ffimnsr@gmail.com>"]
 edition = "2018"
+readme = "README.md"
+description = "This is a simple Telegram bot with interface to Firefly III to process and store simple transactions."
+homepage = "https://github.com/ffimnsr/firefly-tg-bot-rs"
+repository = "https://github.com/ffimnsr/firefly-tg-bot-rs"
+license = "MIT OR Apache-2.0"
+exclude = [".gitignore"]
 publish = false
 
 [dependencies]
