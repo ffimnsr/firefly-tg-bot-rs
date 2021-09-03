@@ -65,7 +65,8 @@ This are the relevant environment variables **needed** to be set.
 
 - [ ] Create state machine to reduce code duplication.
 - [ ] Make bot accept more words.
-
+- [ ] Get info about latest 10 transaction created.
+- [ ] Do reconcilation and support tags and categories.
 
 ## License
 
@@ -85,6 +86,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 
 - [vjFaLk/firefly-bot](https://github.com/vjFaLk/firefly-bot) - inspiration bot project which also use Telegram and Firefly III.
 
-## Refernces
+## References
 
 - [Telegram Bot API](https://core.telegram.org/bots/api)
